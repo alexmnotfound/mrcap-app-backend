@@ -1,8 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import List, Optional
 from app.models import AppUser, AppUserCreate, AppUserUpdate
 from app.db_models import UserRepository, AccountRepository
 from app.middleware.auth import get_current_user, require_admin
+from app.config import settings
+from firebase_admin import auth
+import logging
+
+logger = logging.getLogger(__name__)
+
+security = HTTPBearer(auto_error=False)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -44,6 +52,67 @@ async def get_user(
         )
 
     return user
+
+
+@router.post("/signup", response_model=AppUser, status_code=status.HTTP_201_CREATED)
+async def signup(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """Public signup endpoint - creates user from Firebase token"""
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization token required"
+        )
+
+    # Check if Firebase is initialized (unless in dev mode)
+    if not settings.dev_mode:
+        import firebase_admin
+        if not firebase_admin._apps:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Firebase not configured. Set FIREBASE_CREDENTIALS_PATH or use DEV_MODE=true for local testing."
+            )
+
+    try:
+        # Verify Firebase token
+        token = credentials.credentials
+        decoded_token = auth.verify_id_token(token)
+        firebase_uid = decoded_token["uid"]
+        email = decoded_token.get("email", "")
+        name = decoded_token.get("name", email.split("@")[0]) if email else "User"
+
+        # Check if user already exists
+        existing = UserRepository.find_by_firebase_uid(firebase_uid)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User already exists"
+            )
+
+        # Create user with active status
+        user_data = AppUserCreate(
+            firebase_uid=firebase_uid,
+            email=email,
+            full_name=name,
+            is_admin=False,
+            status="active"
+        )
+
+        return UserRepository.create(user_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signup error: {e}")
+        if "Token expired" in str(e) or "invalid" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to create user"
+        )
 
 
 @router.post("", response_model=AppUser, status_code=status.HTTP_201_CREATED)

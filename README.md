@@ -122,11 +122,51 @@ docker compose exec postgres psql -U mrcap -d mrcap_dashboard
 
 ## Authentication
 
-### Production Mode (Firebase)
+### Firebase Authentication Setup
 
-The API uses Firebase Authentication. To enable:
-1. Set `FIREBASE_CREDENTIALS_PATH` in `.env` pointing to your Firebase service account JSON file
-2. The middleware will automatically verify Firebase ID tokens from the `Authorization: Bearer <token>` header
+The API uses Firebase Admin SDK to verify Firebase ID tokens from your frontend. To set up:
+
+#### Step 1: Get Firebase Service Account Credentials
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Select your project (or create one)
+3. Click the gear icon ⚙️ next to "Project Overview"
+4. Select **"Project settings"**
+5. Go to the **"Service accounts"** tab
+6. Click **"Generate new private key"**
+7. Confirm the download - a JSON file will be downloaded (e.g., `your-project-firebase-adminsdk-xxxxx-xxxxxxxxxx.json`)
+
+#### Step 2: Save the Credentials File
+
+Save the downloaded JSON file in your `backend` directory:
+- Recommended name: `firebase-service-account.json`
+- **Important**: This file contains sensitive credentials - it's already in `.gitignore`
+
+#### Step 3: Configure Environment Variable
+
+Add to your backend `.env` file:
+```bash
+FIREBASE_CREDENTIALS_PATH=./firebase-service-account.json
+```
+
+Or if you saved it in a different location:
+```bash
+FIREBASE_CREDENTIALS_PATH=/full/path/to/your-firebase-adminsdk-xxxxx.json
+```
+
+#### Step 4: Verify Setup
+
+When you start the backend server, you should see:
+```
+INFO: Firebase Admin initialized
+```
+
+If you see a warning instead, check that:
+- The file path is correct
+- The JSON file is valid
+- The file has read permissions
+
+The middleware will automatically verify Firebase ID tokens from the `Authorization: Bearer <token>` header sent by your frontend.
 
 ### Development Mode (Local Testing)
 

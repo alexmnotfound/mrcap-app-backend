@@ -1,5 +1,9 @@
 .PHONY: help install dev run test clean db-up db-down db-reset db-logs db-shell lint format
 
+# Load PORT and HOST from .env file, with defaults
+PORT := $(shell grep -E '^PORT=' .env 2>/dev/null | cut -d '=' -f2 || echo 8000)
+HOST := $(shell grep -E '^HOST=' .env 2>/dev/null | cut -d '=' -f2 || echo 0.0.0.0)
+
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
@@ -14,10 +18,10 @@ dev: ## Install dependencies in development mode
 	pip install -e .
 
 run: db-up ## Run the development server with database
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 3000
+	uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
 
 run-prod: ## Run the production server
-	uvicorn app.main:app --host 0.0.0.0 --port 3000
+	uvicorn app.main:app --host $(HOST) --port $(PORT)
 
 test: ## Run tests (placeholder)
 	@echo "Tests not yet implemented"
