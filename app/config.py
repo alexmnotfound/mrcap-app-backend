@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     postgres_password: str = Field(..., env="POSTGRES_PASSWORD")
     
     # Server
-    port: int = Field(default=3000, env="PORT")
+    port: int = Field(default=8000, env="PORT")
     host: str = Field(default="0.0.0.0", env="HOST")
     
     # Firebase (optional for now)
