@@ -100,6 +100,7 @@ docker compose exec postgres psql -U mrcap -d mrcap_dashboard
 
 ### Users
 - `GET /api/users` - List all users (admin only)
+- `GET /api/users/me` - Get profile for current user
 - `GET /api/users/{id}` - Get user by ID
 - `POST /api/users` - Create user (admin only)
 - `PUT /api/users/{id}` - Update user (admin only)

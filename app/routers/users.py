@@ -15,6 +15,14 @@ async def list_users(
     return UserRepository.find_all()
 
 
+@router.get("/me", response_model=AppUser)
+async def get_me(
+    current_user: AppUser = Depends(get_current_user)
+):
+    """Return the authenticated user profile"""
+    return current_user
+
+
 @router.get("/{user_id}", response_model=AppUser)
 async def get_user(
     user_id: int,

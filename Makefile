@@ -13,7 +13,7 @@ dev: ## Install dependencies in development mode
 	pip install -r requirements.txt
 	pip install -e .
 
-run: ## Run the development server
+run: db-up ## Run the development server with database
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 3000
 
 run-prod: ## Run the production server
