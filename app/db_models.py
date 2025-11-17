@@ -390,6 +390,16 @@ class MovementRepository:
                 return FundShareMovement(**dict(row))
 
     @staticmethod
+    def _convert_decimal_fields(row_dict: dict) -> dict:
+        """Convert Decimal values to strings for UserMovement fields."""
+        decimal_fields = ['amount', 'shares_change', 'share_price', 'total_amount']
+        converted = dict(row_dict)
+        for field in decimal_fields:
+            if field in converted and isinstance(converted[field], Decimal):
+                converted[field] = str(converted[field])
+        return converted
+
+    @staticmethod
     def get_user_movements(user_id: int) -> List[UserMovement]:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -421,7 +431,7 @@ class MovementRepository:
                         fsm.account_id,
                         fsm.effective_date,
                         fsm.created_at,
-                        NULL::text as cash_type,
+                        NULL::cash_movement_type as cash_type,
                         NULL::numeric as amount,
                         NULL::text as currency,
                         fsm.fund_id,
@@ -439,7 +449,7 @@ class MovementRepository:
                     (user_id, user_id)
                 )
                 rows = cur.fetchall()
-                return [UserMovement(**dict(row)) for row in rows]
+                return [UserMovement(**MovementRepository._convert_decimal_fields(dict(row))) for row in rows]
 
     @staticmethod
     def get_cash_and_fund_report() -> List[MovementReportRow]:
@@ -470,6 +480,56 @@ class MovementRepository:
                 )
                 rows = cur.fetchall()
                 return [MovementReportRow(**dict(row)) for row in rows]
+
+    @staticmethod
+    def get_account_movements(account_id: int) -> List[UserMovement]:
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT 
+                        cm.id,
+                        'cash' as type,
+                        cm.account_id,
+                        cm.effective_date,
+                        cm.created_at,
+                        cm.type as cash_type,
+                        cm.amount,
+                        cm.currency,
+                        NULL::bigint as fund_id,
+                        NULL::text as fund_name,
+                        NULL::numeric as shares_change,
+                        NULL::numeric as share_price,
+                        NULL::numeric as total_amount,
+                        NULL::text as share_movement_type
+                      FROM cash_movements cm
+                      WHERE cm.account_id = %s
+                      
+                      UNION ALL
+                      
+                      SELECT 
+                        fsm.id,
+                        'fund_share' as type,
+                        fsm.account_id,
+                        fsm.effective_date,
+                        fsm.created_at,
+                        NULL::cash_movement_type as cash_type,
+                        NULL::numeric as amount,
+                        NULL::text as currency,
+                        fsm.fund_id,
+                        f.name as fund_name,
+                        fsm.shares_change,
+                        fsm.share_price,
+                        fsm.total_amount,
+                        fsm.type::text as share_movement_type
+                      FROM fund_share_movements fsm
+                      JOIN funds f ON fsm.fund_id = f.id
+                      WHERE fsm.account_id = %s
+                      
+                      ORDER BY effective_date DESC, created_at DESC""",
+                    (account_id, account_id)
+                )
+                rows = cur.fetchall()
+                return [UserMovement(**MovementRepository._convert_decimal_fields(dict(row))) for row in rows]
 
 
 class FundRepository:
@@ -539,54 +599,4 @@ class FundRepository:
             performances.append(FundPerformance(**perf))
 
         return performances
-
-    @staticmethod
-    def get_account_movements(account_id: int) -> List[UserMovement]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """SELECT 
-                        cm.id,
-                        'cash' as type,
-                        cm.account_id,
-                        cm.effective_date,
-                        cm.created_at,
-                        cm.type as cash_type,
-                        cm.amount,
-                        cm.currency,
-                        NULL::bigint as fund_id,
-                        NULL::text as fund_name,
-                        NULL::numeric as shares_change,
-                        NULL::numeric as share_price,
-                        NULL::numeric as total_amount,
-                        NULL::text as share_movement_type
-                      FROM cash_movements cm
-                      WHERE cm.account_id = %s
-                      
-                      UNION ALL
-                      
-                      SELECT 
-                        fsm.id,
-                        'fund_share' as type,
-                        fsm.account_id,
-                        fsm.effective_date,
-                        fsm.created_at,
-                        NULL::text as cash_type,
-                        NULL::numeric as amount,
-                        NULL::text as currency,
-                        fsm.fund_id,
-                        f.name as fund_name,
-                        fsm.shares_change,
-                        fsm.share_price,
-                        fsm.total_amount,
-                        fsm.type::text as share_movement_type
-                      FROM fund_share_movements fsm
-                      JOIN funds f ON fsm.fund_id = f.id
-                      WHERE fsm.account_id = %s
-                      
-                      ORDER BY effective_date DESC, created_at DESC""",
-                    (account_id, account_id)
-                )
-                rows = cur.fetchall()
-                return [UserMovement(**dict(row)) for row in rows]
 
