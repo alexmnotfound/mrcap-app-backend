@@ -51,8 +51,11 @@ CREATE TABLE fund_navs (
     id BIGSERIAL PRIMARY KEY,
     fund_id BIGINT NOT NULL REFERENCES funds (id) ON DELETE CASCADE,
     as_of_date DATE NOT NULL,
-    nav_per_share NUMERIC(18, 6) NOT NULL,
-    total_aum NUMERIC(20, 2) NOT NULL,
+    fund_accumulated NUMERIC(20, 2) NOT NULL,
+    shares_amount NUMERIC(20, 6) NOT NULL,
+    share_value NUMERIC(18, 6) NOT NULL,
+    delta_previous NUMERIC(8, 4),
+    delta_since_origin NUMERIC(8, 4),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT fund_navs_fund_date_unique UNIQUE (fund_id, as_of_date)
 );

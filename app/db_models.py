@@ -15,6 +15,7 @@ from app.models import (
     UserMovement,
     AccountSummary,
     FundPosition,
+    Fund,
     FundPerformance,
     FundNavPoint,
     MovementReportRow,
@@ -237,8 +238,8 @@ class AccountRepository:
                     """
                     SELECT DISTINCT ON (fund_id)
                         fund_id,
-                        nav_per_share,
-                        total_aum,
+                        share_value,
+                        fund_accumulated,
                         as_of_date
                     FROM fund_navs
                     ORDER BY fund_id, as_of_date DESC
@@ -247,18 +248,18 @@ class AccountRepository:
                 nav_rows = cur.fetchall()
                 nav_map = {row["fund_id"]: row for row in nav_rows}
 
-        summaries: List[AccountSummary] = []
-        for row in account_rows:
-            total_deposits = row["total_deposits"] or Decimal("0")
-            total_withdrawals = row["total_withdrawals"] or Decimal("0")
-            total_fees = row["total_fees"] or Decimal("0")
-            net_invested = total_deposits - total_withdrawals - total_fees
+                summaries: List[AccountSummary] = []
+                for row in account_rows:
+                    total_deposits = row["total_deposits"] or Decimal("0")
+                    total_withdrawals = row["total_withdrawals"] or Decimal("0")
+                    total_fees = row["total_fees"] or Decimal("0")
+                    net_invested = total_deposits - total_withdrawals - total_fees
 
-            positions: List[FundPosition] = []
-            for pos in positions_map.get(row["account_id"], []):
-                total_shares = pos["total_shares"] or Decimal("0")
-                latest_nav = nav_map.get(pos["fund_id"])
-                latest_nav_value = latest_nav["nav_per_share"] if latest_nav else None
+                    positions: List[FundPosition] = []
+                    for pos in positions_map.get(row["account_id"], []):
+                        total_shares = pos["total_shares"] or Decimal("0")
+                        latest_nav = nav_map.get(pos["fund_id"])
+                        latest_nav_value = latest_nav["share_value"] if latest_nav else None
                 market_value = None
                 if latest_nav_value is not None:
                     market_value = Decimal(total_shares) * Decimal(latest_nav_value)
@@ -269,7 +270,7 @@ class AccountRepository:
                         fund_name=pos["fund_name"],
                         currency=pos["currency"],
                         total_shares=total_shares,
-                        latest_nav_per_share=latest_nav_value,
+                        latest_share_value=latest_nav_value,
                         market_value=market_value,
                     )
                 )
@@ -534,6 +535,17 @@ class MovementRepository:
 
 class FundRepository:
     @staticmethod
+    def find_all() -> List[Fund]:
+        """Get all available funds"""
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, name, currency, created_at FROM funds ORDER BY name"
+                )
+                rows = cur.fetchall()
+                return [Fund(**dict(row)) for row in rows]
+
+    @staticmethod
     def get_latest_navs_map() -> Dict[int, Dict]:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -541,8 +553,8 @@ class FundRepository:
                     """
                     SELECT DISTINCT ON (fund_id)
                         fund_id,
-                        nav_per_share,
-                        total_aum,
+                        share_value,
+                        fund_accumulated,
                         as_of_date
                     FROM fund_navs
                     ORDER BY fund_id, as_of_date DESC
@@ -550,6 +562,59 @@ class FundRepository:
                 )
                 rows = cur.fetchall()
         return {row["fund_id"]: row for row in rows}
+
+    @staticmethod
+    def get_fund_performance_by_id(fund_id: int, limit: Optional[int] = None) -> Optional[FundPerformance]:
+        """Get performance data for a specific fund"""
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Check if fund exists
+                cur.execute("SELECT id, name, currency FROM funds WHERE id = %s", (fund_id,))
+                fund_row = cur.fetchone()
+                if not fund_row:
+                    return None
+
+                cur.execute(
+                    """
+                    SELECT 
+                        fn.as_of_date,
+                        fn.fund_accumulated,
+                        fn.shares_amount,
+                        fn.share_value,
+                        fn.delta_previous,
+                        fn.delta_since_origin
+                    FROM fund_navs fn
+                    WHERE fn.fund_id = %s
+                    ORDER BY fn.as_of_date DESC
+                    LIMIT %s
+                    """,
+                    (fund_id, limit if limit else 365)
+                )
+                rows = cur.fetchall()
+
+                navs = [
+                    FundNavPoint(
+                        as_of_date=row["as_of_date"],
+                        fund_accumulated=row["fund_accumulated"],
+                        shares_amount=row["shares_amount"],
+                        share_value=row["share_value"],
+                        delta_previous=row.get("delta_previous"),
+                        delta_since_origin=row.get("delta_since_origin"),
+                    )
+                    for row in rows
+                ]
+
+                # Sort nav points chronologically
+                navs.sort(key=lambda n: n.as_of_date)
+                latest_nav = navs[-1].share_value if navs else None
+
+                return FundPerformance(
+                    fund_id=fund_id,
+                    fund_name=fund_row["name"],
+                    currency=fund_row["currency"],
+                    latest_share_value=latest_nav,
+                    navs=navs,
+                )
 
     @staticmethod
     def get_fund_performance(limit: Optional[int] = None) -> List[FundPerformance]:
@@ -562,8 +627,11 @@ class FundRepository:
                         f.name AS fund_name,
                         f.currency,
                         fn.as_of_date,
-                        fn.nav_per_share,
-                        fn.total_aum
+                        fn.fund_accumulated,
+                        fn.shares_amount,
+                        fn.share_value,
+                        fn.delta_previous,
+                        fn.delta_since_origin
                     FROM funds f
                     JOIN fund_navs fn ON fn.fund_id = f.id
                     ORDER BY f.id, fn.as_of_date DESC
@@ -579,7 +647,7 @@ class FundRepository:
                     "fund_id": row["fund_id"],
                     "fund_name": row["fund_name"],
                     "currency": row["currency"],
-                    "latest_nav_per_share": row["nav_per_share"],
+                    "latest_share_value": row["share_value"],
                     "navs": [],
                 },
             )
@@ -587,8 +655,11 @@ class FundRepository:
                 perf["navs"].append(
                     FundNavPoint(
                         as_of_date=row["as_of_date"],
-                        nav_per_share=row["nav_per_share"],
-                        total_aum=row["total_aum"],
+                        fund_accumulated=row["fund_accumulated"],
+                        shares_amount=row["shares_amount"],
+                        share_value=row["share_value"],
+                        delta_previous=row.get("delta_previous"),
+                        delta_since_origin=row.get("delta_since_origin"),
                     )
                 )
 

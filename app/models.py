@@ -144,10 +144,10 @@ class FundPosition(BaseModel):
     fund_name: str
     currency: str
     total_shares: Union[str, Decimal]
-    latest_nav_per_share: Optional[Union[str, Decimal]] = None
+    latest_share_value: Optional[Union[str, Decimal]] = None
     market_value: Optional[Union[str, Decimal]] = None
 
-    @field_validator('total_shares', 'latest_nav_per_share', 'market_value', mode='before')
+    @field_validator('total_shares', 'latest_share_value', 'market_value', mode='before')
     @classmethod
     def convert_decimal(cls, v):
         if isinstance(v, Decimal):
@@ -176,10 +176,13 @@ class AccountSummary(BaseModel):
 
 class FundNavPoint(BaseModel):
     as_of_date: date
-    nav_per_share: Union[str, Decimal]
-    total_aum: Union[str, Decimal]
+    fund_accumulated: Union[str, Decimal]
+    shares_amount: Union[str, Decimal]
+    share_value: Union[str, Decimal]
+    delta_previous: Optional[Union[str, Decimal]] = None
+    delta_since_origin: Optional[Union[str, Decimal]] = None
 
-    @field_validator('nav_per_share', 'total_aum', mode='before')
+    @field_validator('fund_accumulated', 'shares_amount', 'share_value', 'delta_previous', 'delta_since_origin', mode='before')
     @classmethod
     def convert_decimal(cls, v):
         if isinstance(v, Decimal):
@@ -187,14 +190,24 @@ class FundNavPoint(BaseModel):
         return str(v) if v is not None else None
 
 
+class Fund(BaseModel):
+    id: int
+    name: str
+    currency: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class FundPerformance(BaseModel):
     fund_id: int
     fund_name: str
     currency: str
-    latest_nav_per_share: Optional[Union[str, Decimal]] = None
+    latest_share_value: Optional[Union[str, Decimal]] = None
     navs: List[FundNavPoint] = []
 
-    @field_validator('latest_nav_per_share', mode='before')
+    @field_validator('latest_share_value', mode='before')
     @classmethod
     def convert_decimal(cls, v):
         if isinstance(v, Decimal):
