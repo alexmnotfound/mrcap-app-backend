@@ -1,0 +1,57 @@
+# Development docker-compose configuration
+# Use: docker compose -f docker-compose.dev.yml up
+# For production, use: docker compose -f docker-compose.prod.yml up
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: mrcap-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"  # Solo escucha en localhost
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    networks:
+      - mrcap-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mrcap-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      HOST: 0.0.0.0
+      PORT: 8000
+      FIREBASE_CREDENTIALS_PATH: /app/firebase-service-account.json
+      DEV_MODE: "false"
+    ports:
+      - "127.0.0.1:8000:8000"  # Solo escucha en localhost, Nginx hará proxy
+    volumes:
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+    depends_on:
+      - postgres
+    networks:
+      - mrcap-network
+
+volumes:
+  postgres-data:
+
+networks:
+  mrcap-network:
+    driver: bridge
+

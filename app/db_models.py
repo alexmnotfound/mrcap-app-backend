@@ -233,7 +233,7 @@ class AccountRepository:
                     for pos_row in cur.fetchall():
                         positions_map[pos_row["account_id"]].append(pos_row)
 
-                # Latest NAV per fund
+                # Latest share value per fund
                 cur.execute(
                     """
                     SELECT DISTINCT ON (fund_id)

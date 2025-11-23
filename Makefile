@@ -32,21 +32,21 @@ clean: ## Clean Python cache files
 	find . -type f -name "*.pyo" -delete
 	find . -type d -name "*.egg-info" -exec rm -r {} + 2>/dev/null || true
 
-db-up: ## Start PostgreSQL database
-	docker compose up -d
+db-up: ## Start PostgreSQL database (dev)
+	docker compose -f docker-compose.dev.yml up -d
 
-db-down: ## Stop PostgreSQL database
-	docker compose down
+db-down: ## Stop PostgreSQL database (dev)
+	docker compose -f docker-compose.dev.yml down
 
 db-reset: ## Reset database (WARNING: deletes all data)
-	docker compose down -v
-	docker compose up -d
+	docker compose -f docker-compose.dev.yml down -v
+	docker compose -f docker-compose.dev.yml up -d
 
 db-logs: ## Show database logs
-	docker compose logs -f postgres
+	docker compose -f docker-compose.dev.yml logs -f postgres
 
 db-shell: ## Access database shell
-	docker compose exec postgres psql -U mrcap -d mrcap_dashboard
+	docker compose -f docker-compose.dev.yml exec postgres psql -U mrcap -d mrcap_dashboard
 
 setup: ## Initial setup: create venv and install dependencies
 	python3 -m venv venv
