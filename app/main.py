@@ -16,10 +16,15 @@ app = FastAPI(
 )
 
 # CORS
-# TODO: Configure CORS for production
+# Configure CORS for production with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[
+        "https://app.mrcapitals.com.ar",
+        "http://app.mrcapitals.com.ar",  # For development/testing
+        "http://localhost:3000",  # Local development
+        "http://localhost:3001",  # Alternative local port
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
