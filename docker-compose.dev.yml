@@ -43,7 +43,8 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       FIREBASE_CREDENTIALS_PATH: /app/firebase-service-account.json
-      DEV_MODE: "false"
+      DEV_MODE: ${DEV_MODE:-false}
+      DEV_USER_ID: ${DEV_USER_ID:-}
     ports:
       - "127.0.0.1:8000:8000"  # Solo escucha en localhost, Nginx hará proxy
     volumes:
