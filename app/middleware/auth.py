@@ -56,35 +56,59 @@ async def get_current_user(
 
     # Production mode: require Firebase
     if not firebase_app:
+        logger.error("Firebase app not initialized")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication not configured. Set DEV_MODE=true for local testing."
         )
 
+    # Check if credentials were provided
+    if not credentials:
+        logger.warning("No authorization credentials provided")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization token required"
+        )
+
     try:
         token = credentials.credentials
+        if not token:
+            logger.warning("Empty authorization token provided")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization token is empty"
+            )
+
+        logger.debug(f"Verifying Firebase token (length: {len(token)})")
         decoded_token = auth.verify_id_token(token)
         firebase_uid = decoded_token["uid"]
+        logger.debug(f"Token verified for Firebase UID: {firebase_uid}")
 
         user = UserRepository.find_by_firebase_uid(firebase_uid)
         if not user:
+            logger.warning(f"User not found for Firebase UID: {firebase_uid}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
 
         if user.status != "active":
+            logger.warning(f"User {user.id} ({firebase_uid}) is not active (status: {user.status})")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is not active"
             )
 
+        logger.debug(f"User authenticated: {user.id} ({user.email})")
         return user
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"Auth error: {e}")
+        logger.error(f"Auth error: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail=f"Invalid token: {str(e)}"
         )
 
 
