@@ -1,7 +1,11 @@
 from psycopg2.extras import RealDictCursor
 from collections import defaultdict
 from decimal import Decimal
+
+import logging
 from app.database import get_db
+
+logger = logging.getLogger(__name__)
 from app.models import (
     AppUser,
     AppUserCreate,
@@ -183,6 +187,7 @@ class AccountRepository:
                     SELECT 
                         a.id AS account_id,
                         a.account_number,
+                        a.commission_rate,
                         u.full_name,
                         u.email,
                         COALESCE(SUM(CASE WHEN cm.type = 'deposit' THEN cm.amount ELSE 0 END), 0) AS total_deposits,
@@ -192,7 +197,7 @@ class AccountRepository:
                     JOIN app_users u ON a.user_id = u.id
                     LEFT JOIN cash_movements cm ON cm.account_id = a.id
                     {where_clause}
-                    GROUP BY a.id, a.account_number, u.full_name, u.email
+                    GROUP BY a.id, a.account_number, a.commission_rate, u.full_name, u.email
                     ORDER BY u.full_name, a.account_number
                     """,
                     params,
@@ -252,42 +257,82 @@ class AccountRepository:
                 for row in account_rows:
                     total_deposits = row["total_deposits"] or Decimal("0")
                     total_withdrawals = row["total_withdrawals"] or Decimal("0")
-                    total_fees = row["total_fees"] or Decimal("0")
-                    net_invested = total_deposits - total_withdrawals - total_fees
-
+                    explicit_fees = row["total_fees"] or Decimal("0")
+                    
                     positions: List[FundPosition] = []
-                    for pos in positions_map.get(row["account_id"], []):
+                    account_positions = positions_map.get(row["account_id"], [])
+                    total_market_value = Decimal("0")
+                    
+                    for pos in account_positions:
                         total_shares = pos["total_shares"] or Decimal("0")
                         latest_nav = nav_map.get(pos["fund_id"])
                         latest_nav_value = latest_nav["share_value"] if latest_nav else None
-                market_value = None
-                if latest_nav_value is not None:
-                    market_value = Decimal(total_shares) * Decimal(latest_nav_value)
+                        market_value = None
+                        if latest_nav_value is not None:
+                            market_value = Decimal(total_shares) * Decimal(latest_nav_value)
+                            total_market_value += market_value
 
-                positions.append(
-                    FundPosition(
-                        fund_id=pos["fund_id"],
-                        fund_name=pos["fund_name"],
-                        currency=pos["currency"],
-                        total_shares=total_shares,
-                        latest_share_value=latest_nav_value,
-                        market_value=market_value,
-                    )
-                )
+                        positions.append(
+                            FundPosition(
+                                fund_id=pos["fund_id"],
+                                fund_name=pos["fund_name"],
+                                currency=pos["currency"],
+                                total_shares=total_shares,
+                                latest_share_value=latest_nav_value,
+                                market_value=market_value,
+                            )
+                        )
 
-            summaries.append(
-                AccountSummary(
-                    account_id=row["account_id"],
-                    account_number=row["account_number"],
-                    total_deposits=total_deposits,
-                    total_withdrawals=total_withdrawals,
-                    total_fees=total_fees,
-                    net_invested=net_invested,
-                    positions=positions,
-                    user_full_name=row["full_name"],
-                    user_email=row["email"],
-                )
-            )
+                    # Get commission_rate directly from row (it's in the SELECT)
+                    # Access directly since it's guaranteed to be in SELECT
+                    commission_rate_raw = row["commission_rate"] if "commission_rate" in row else None
+                    
+                    # Convert to Decimal for calculation
+                    commission_rate = Decimal("0")
+                    if commission_rate_raw is not None:
+                        if isinstance(commission_rate_raw, Decimal):
+                            commission_rate = commission_rate_raw
+                        elif isinstance(commission_rate_raw, (int, float)):
+                            commission_rate = Decimal(str(commission_rate_raw))
+                        else:
+                            commission_rate = Decimal(str(commission_rate_raw))
+                    
+                    # Calculate commissions based on gains (market_value - net_invested)
+                    # Net invested before commissions = deposits - withdrawals - explicit fees
+                    net_invested_before_commissions = total_deposits - total_withdrawals - explicit_fees
+                    total_gains = total_market_value - net_invested_before_commissions
+                    
+                    # Commission is calculated on gains (only if positive)
+                    calculated_commissions = Decimal("0")
+                    if total_gains > 0:
+                        calculated_commissions = total_gains * commission_rate
+                    
+                    # Total fees = explicit fees + calculated commissions
+                    total_fees = explicit_fees + calculated_commissions
+                    
+                    # Net invested = deposits - withdrawals - fees (original calculation)
+                    # This is the base investment amount, used by the regular dashboard
+                    net_invested = total_deposits - total_withdrawals - total_fees
+                    
+                    # Convert commission_rate to string for response
+                    commission_rate_value = str(commission_rate) if commission_rate else None
+                    
+                    # Force include in model by always setting it (even if None)
+                    account_data = {
+                        "account_id": row["account_id"],
+                        "account_number": row["account_number"],
+                        "commission_rate": commission_rate_value,  # Explicitly set, even if None
+                        "total_deposits": total_deposits,
+                        "total_withdrawals": total_withdrawals,
+                        "total_fees": total_fees,
+                        "net_invested": net_invested,
+                        "positions": positions,
+                        "user_full_name": row["full_name"],
+                        "user_email": row["email"],
+                    }
+                    
+                    summaries.append(AccountSummary(**account_data))
+
 
         return summaries
 
