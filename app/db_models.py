@@ -1,11 +1,7 @@
 from psycopg2.extras import RealDictCursor
 from collections import defaultdict
 from decimal import Decimal
-
-import logging
 from app.database import get_db
-
-logger = logging.getLogger(__name__)
 from app.models import (
     AppUser,
     AppUserCreate,
