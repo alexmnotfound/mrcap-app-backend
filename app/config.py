@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from typing import Optional
 
 
@@ -21,6 +21,20 @@ class Settings(BaseSettings):
     # Development mode - bypasses auth when True (⚠️ DO NOT USE IN PRODUCTION)
     dev_mode: bool = Field(default=False, env="DEV_MODE")
     dev_user_id: Optional[int] = Field(default=None, env="DEV_USER_ID")
+    
+    @field_validator('dev_user_id', mode='before')
+    @classmethod
+    def parse_dev_user_id(cls, v):
+        """Convert empty string to None for dev_user_id"""
+        if v == '' or v is None:
+            return None
+        if isinstance(v, str):
+            # Try to parse as int
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return v
     
     class Config:
         env_file = ".env"
