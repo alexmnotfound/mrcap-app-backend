@@ -73,12 +73,29 @@ class CashMovementBase(BaseModel):
 
 
 class CashMovementCreate(CashMovementBase):
-    pass
+    fund_id: Optional[int] = None  # Optional fund_id for automatic subscription on deposits
+
+
+class CashMovementUpdate(BaseModel):
+    type: Optional[CashMovementType] = None
+    amount: Optional[Union[str, Decimal]] = None
+    currency: Optional[str] = None
+    effective_date: Optional[date] = None
+    fund_id: Optional[int] = None  # Optional fund_id for creating subscription on update
+
+    @field_validator('amount', mode='before')
+    @classmethod
+    def convert_amount(cls, v):
+        if isinstance(v, Decimal):
+            return str(v)
+        return str(v) if v is not None else None
 
 
 class CashMovement(CashMovementBase):
     id: int
     created_at: datetime
+    user_name: Optional[str] = None  # User name for admin display
+    fund_id: Optional[int] = None  # Fund ID from associated subscription (for display)
 
     class Config:
         from_attributes = True
@@ -105,6 +122,21 @@ class FundShareMovementBase(BaseModel):
 
 class FundShareMovementCreate(FundShareMovementBase):
     pass
+
+
+class FundShareMovementUpdate(BaseModel):
+    fund_id: Optional[int] = None
+    shares_change: Optional[Union[str, Decimal]] = None
+    share_price: Optional[Union[str, Decimal]] = None
+    total_amount: Optional[Union[str, Decimal]] = None
+    effective_date: Optional[date] = None
+    
+    @field_validator('shares_change', 'share_price', 'total_amount', mode='before')
+    @classmethod
+    def convert_decimal(cls, v):
+        if isinstance(v, Decimal):
+            return str(v)
+        return str(v) if v is not None else None
 
 
 class FundShareMovement(FundShareMovementBase):
@@ -188,6 +220,51 @@ class FundNavPoint(BaseModel):
         if isinstance(v, Decimal):
             return str(v)
         return str(v) if v is not None else None
+
+
+class FundNavBase(BaseModel):
+    fund_id: int
+    as_of_date: date
+    fund_accumulated: Union[str, Decimal]
+    shares_amount: Union[str, Decimal]
+    share_value: Union[str, Decimal]
+    delta_previous: Optional[Union[str, Decimal]] = None
+    delta_since_origin: Optional[Union[str, Decimal]] = None
+
+    @field_validator('fund_accumulated', 'shares_amount', 'share_value', 'delta_previous', 'delta_since_origin', mode='before')
+    @classmethod
+    def convert_decimal(cls, v):
+        if isinstance(v, Decimal):
+            return str(v)
+        return str(v) if v is not None else None
+
+
+class FundNavCreate(FundNavBase):
+    pass
+
+
+class FundNavUpdate(BaseModel):
+    as_of_date: Optional[date] = None
+    fund_accumulated: Optional[Union[str, Decimal]] = None
+    shares_amount: Optional[Union[str, Decimal]] = None
+    share_value: Optional[Union[str, Decimal]] = None
+    delta_previous: Optional[Union[str, Decimal]] = None
+    delta_since_origin: Optional[Union[str, Decimal]] = None
+
+    @field_validator('fund_accumulated', 'shares_amount', 'share_value', 'delta_previous', 'delta_since_origin', mode='before')
+    @classmethod
+    def convert_decimal(cls, v):
+        if isinstance(v, Decimal):
+            return str(v)
+        return str(v) if v is not None else None
+
+
+class FundNav(FundNavBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class Fund(BaseModel):

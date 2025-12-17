@@ -18,6 +18,8 @@ dev: ## Install dependencies in development mode
 	pip install -e .
 
 run: db-up ## Run the development server with database
+	@echo "Stopping Docker backend to avoid port conflict..."
+	@docker compose -f docker-compose.dev.yml stop backend 2>/dev/null || true
 	uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
 
 run-prod: ## Run the production server
@@ -26,6 +28,9 @@ run-prod: ## Run the production server
 test: ## Run tests (placeholder)
 	@echo "Tests not yet implemented"
 
+logs: ## Show backend logs
+	docker compose -f docker-compose.prod.yml logs --tail=50 backend
+
 clean: ## Clean Python cache files
 	find . -type d -name __pycache__ -exec rm -r {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
@@ -33,7 +38,7 @@ clean: ## Clean Python cache files
 	find . -type d -name "*.egg-info" -exec rm -r {} + 2>/dev/null || true
 
 db-up: ## Start PostgreSQL database (dev)
-	docker compose -f docker-compose.dev.yml up -d
+	docker compose -f docker-compose.dev.yml up -d postgres
 
 db-down: ## Stop PostgreSQL database (dev)
 	docker compose -f docker-compose.dev.yml down
