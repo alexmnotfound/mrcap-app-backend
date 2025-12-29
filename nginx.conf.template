@@ -1,5 +1,9 @@
-# Rate limiting (adjust as needed)
-limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+# Rate limiting - más estricto para prevenir abuso
+# 5 requests por segundo por IP (más conservador que antes)
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=5r/s;
+
+# Límite de conexiones simultáneas por IP
+limit_conn_zone $binary_remote_addr zone=conn_limit:10m;
 
 server {
     listen 80;
@@ -18,7 +22,8 @@ server {
 
     # API endpoints with rate limiting
     location / {
-        limit_req zone=api_limit burst=20 nodelay;
+        limit_req zone=api_limit burst=10 nodelay;
+        limit_conn conn_limit 15;
         
         proxy_pass http://localhost:8000;
         proxy_set_header Host $host;
@@ -60,7 +65,7 @@ server {
 #     add_header X-Content-Type-Options "nosniff" always;
 #     add_header X-XSS-Protection "1; mode=block" always;
 #
-#     # Health check endpoint
+#     # Health check endpoint (no rate limiting)
 #     location /health {
 #         proxy_pass http://localhost:8000/health;
 #         proxy_set_header Host $host;
@@ -69,7 +74,8 @@ server {
 #
 #     # API endpoints with rate limiting
 #     location / {
-#         limit_req zone=api_limit burst=20 nodelay;
+#         limit_req zone=api_limit burst=10 nodelay;
+#         limit_conn conn_limit 15;
 #         
 #         proxy_pass http://localhost:8000;
 #         proxy_set_header Host $host;

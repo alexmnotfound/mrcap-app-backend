@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db, close_db
 from app.middleware.auth import initialize_firebase
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.routers import users, movements, accounts, funds
 import logging
 
@@ -18,6 +19,9 @@ app = FastAPI(
     description="Backend API for MR Capitals Dashboard",
     version="1.0.0"
 )
+
+# Rate limiting middleware (debe ir antes de CORS)
+app.add_middleware(RateLimitMiddleware, max_requests=10)
 
 # CORS
 # Configure CORS for production with specific origins

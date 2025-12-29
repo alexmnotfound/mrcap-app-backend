@@ -1,7 +1,6 @@
 from psycopg2.extras import RealDictCursor
 from collections import defaultdict
 from decimal import Decimal
-from datetime import date
 from app.database import get_db
 from app.models import (
     AppUser,
@@ -11,19 +10,14 @@ from app.models import (
     AccountCreate,
     CashMovement,
     CashMovementCreate,
-    CashMovementUpdate,
     FundShareMovement,
     FundShareMovementCreate,
-    FundShareMovementUpdate,
     UserMovement,
     AccountSummary,
     FundPosition,
     Fund,
     FundPerformance,
     FundNavPoint,
-    FundNav,
-    FundNavCreate,
-    FundNavUpdate,
     MovementReportRow,
 )
 from typing import List, Optional, Dict
@@ -371,7 +365,6 @@ class MovementRepository:
     def create_cash_movement(movement_data: CashMovementCreate) -> CashMovement:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Create the cash movement
                 cur.execute(
                     """INSERT INTO cash_movements 
                        (account_id, type, amount, currency, effective_date)
@@ -386,183 +379,7 @@ class MovementRepository:
                     )
                 )
                 row = cur.fetchone()
-                cash_movement = CashMovement(**dict(row))
-                
-                # If it's a deposit and has a fund_id, create automatic subscription
-                if movement_data.type == "deposit" and movement_data.fund_id:
-                    # Get the latest NAV for the fund on or before the effective date
-                    latest_nav = FundRepository.get_latest_nav_for_date(
-                        movement_data.fund_id, 
-                        movement_data.effective_date
-                    )
-                    
-                    if not latest_nav:
-                        raise ValueError(
-                            f"No NAV found for fund {movement_data.fund_id} on or before {movement_data.effective_date}"
-                        )
-                    
-                    # Calculate shares: amount / share_price
-                    amount_decimal = Decimal(str(movement_data.amount))
-                    share_price_decimal = Decimal(str(latest_nav.share_value))
-                    shares_change = amount_decimal / share_price_decimal
-                    
-                    # Create the fund share movement (subscription)
-                    cur.execute(
-                        """INSERT INTO fund_share_movements 
-                           (account_id, fund_id, cash_movement_id, type, shares_change, share_price, total_amount, effective_date)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                           RETURNING *""",
-                        (
-                            movement_data.account_id,
-                            movement_data.fund_id,
-                            cash_movement.id,
-                            "subscription",
-                            shares_change,
-                            latest_nav.share_value,
-                            movement_data.amount,
-                            movement_data.effective_date,
-                        )
-                    )
-                    # Subscription created successfully
-                
-                return cash_movement
-
-    @staticmethod
-    def find_cash_movement_by_id(movement_id: int) -> Optional[CashMovement]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """SELECT cm.*, fsm.fund_id
-                       FROM cash_movements cm
-                       LEFT JOIN fund_share_movements fsm ON cm.id = fsm.cash_movement_id
-                       WHERE cm.id = %s
-                       LIMIT 1""",
-                    (movement_id,)
-                )
-                row = cur.fetchone()
-                if row:
-                    # Convert to dict and handle fund_id
-                    movement_dict = dict(row)
-                    # If multiple rows (shouldn't happen with LIMIT 1), take first fund_id
-                    return CashMovement(**movement_dict)
-                return None
-
-    @staticmethod
-    def update_cash_movement(movement_id: int, movement_data: CashMovementUpdate) -> Optional[CashMovement]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Get the existing cash movement
-                cur.execute("SELECT * FROM cash_movements WHERE id = %s", (movement_id,))
-                existing_row = cur.fetchone()
-                if not existing_row:
-                    return None
-                
-                existing_movement = CashMovement(**dict(existing_row))
-                
-                # Build dynamic UPDATE query
-                updates = []
-                params = []
-                
-                if movement_data.type is not None:
-                    updates.append("type = %s")
-                    params.append(movement_data.type)
-                if movement_data.amount is not None:
-                    updates.append("amount = %s")
-                    params.append(movement_data.amount)
-                if movement_data.currency is not None:
-                    updates.append("currency = %s")
-                    params.append(movement_data.currency)
-                if movement_data.effective_date is not None:
-                    updates.append("effective_date = %s")
-                    params.append(movement_data.effective_date)
-                
-                # Update the cash movement if there are changes
-                if updates:
-                    params.append(movement_id)
-                    cur.execute(
-                        f"UPDATE cash_movements SET {', '.join(updates)} WHERE id = %s RETURNING *",
-                        params
-                    )
-                    row = cur.fetchone()
-                    updated_movement = CashMovement(**dict(row)) if row else existing_movement
-                else:
-                    updated_movement = existing_movement
-                
-                # If fund_id is provided and it's a deposit, check if subscription exists and create if needed
-                # This works even if no other fields were updated
-                if movement_data.fund_id is not None and updated_movement.type == "deposit":
-                    # Check if a subscription already exists for this cash movement
-                    cur.execute(
-                        "SELECT id FROM fund_share_movements WHERE cash_movement_id = %s",
-                        (movement_id,)
-                    )
-                    existing_subscription = cur.fetchone()
-                    
-                    if not existing_subscription:
-                        # No subscription exists, create one
-                        effective_date = movement_data.effective_date or existing_movement.effective_date
-                        amount = Decimal(str(movement_data.amount or existing_movement.amount))
-                        
-                        # Get the latest NAV for the fund on or before the effective date
-                        latest_nav = FundRepository.get_latest_nav_for_date(
-                            movement_data.fund_id,
-                            effective_date
-                        )
-                        
-                        if latest_nav:
-                            # Calculate shares: amount / share_price
-                            share_price_decimal = Decimal(str(latest_nav.share_value))
-                            shares_change = amount / share_price_decimal
-                            
-                            # Create the fund share movement (subscription)
-                            cur.execute(
-                                """INSERT INTO fund_share_movements 
-                                   (account_id, fund_id, cash_movement_id, type, shares_change, share_price, total_amount, effective_date)
-                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                                   RETURNING *""",
-                                (
-                                    updated_movement.account_id,
-                                    movement_data.fund_id,
-                                    movement_id,
-                                    "subscription",
-                                    shares_change,
-                                    latest_nav.share_value,
-                                    str(amount),
-                                    effective_date,
-                                )
-                            )
-                            # Subscription created successfully
-                
-                return updated_movement
-
-    @staticmethod
-    def delete_cash_movement(movement_id: int) -> bool:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "DELETE FROM cash_movements WHERE id = %s",
-                    (movement_id,)
-                )
-                return cur.rowcount > 0
-
-    @staticmethod
-    def get_all_cash_movements() -> List[CashMovement]:
-        """Get all cash movements across all accounts (admin only)"""
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """SELECT DISTINCT ON (cm.id)
-                       cm.*, 
-                       u.full_name as user_name,
-                       fsm.fund_id
-                       FROM cash_movements cm
-                       JOIN accounts a ON cm.account_id = a.id
-                       JOIN app_users u ON a.user_id = u.id
-                       LEFT JOIN fund_share_movements fsm ON cm.id = fsm.cash_movement_id
-                       ORDER BY cm.id, cm.effective_date DESC, cm.created_at DESC"""
-                )
-                rows = cur.fetchall()
-                return [CashMovement(**dict(row)) for row in rows]
+                return CashMovement(**dict(row))
 
     @staticmethod
     def get_fund_share_movements_by_account(account_id: int) -> List[FundShareMovement]:
@@ -613,63 +430,6 @@ class MovementRepository:
                 )
                 row = cur.fetchone()
                 return FundShareMovement(**dict(row))
-
-    @staticmethod
-    def find_fund_share_movement_by_id(movement_id: int) -> Optional[FundShareMovement]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT * FROM fund_share_movements WHERE id = %s",
-                    (movement_id,)
-                )
-                row = cur.fetchone()
-                return FundShareMovement(**dict(row)) if row else None
-
-    @staticmethod
-    def update_fund_share_movement(movement_id: int, movement_data: FundShareMovementUpdate) -> Optional[FundShareMovement]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Build dynamic UPDATE query
-                updates = []
-                params = []
-                
-                if movement_data.fund_id is not None:
-                    updates.append("fund_id = %s")
-                    params.append(movement_data.fund_id)
-                if movement_data.shares_change is not None:
-                    updates.append("shares_change = %s")
-                    params.append(movement_data.shares_change)
-                if movement_data.share_price is not None:
-                    updates.append("share_price = %s")
-                    params.append(movement_data.share_price)
-                if movement_data.total_amount is not None:
-                    updates.append("total_amount = %s")
-                    params.append(movement_data.total_amount)
-                if movement_data.effective_date is not None:
-                    updates.append("effective_date = %s")
-                    params.append(movement_data.effective_date)
-                
-                if not updates:
-                    # No updates provided, just return the existing record
-                    return MovementRepository.find_fund_share_movement_by_id(movement_id)
-                
-                params.append(movement_id)
-                cur.execute(
-                    f"UPDATE fund_share_movements SET {', '.join(updates)} WHERE id = %s RETURNING *",
-                    params
-                )
-                row = cur.fetchone()
-                return FundShareMovement(**dict(row)) if row else None
-
-    @staticmethod
-    def delete_fund_share_movement(movement_id: int) -> bool:
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM fund_share_movements WHERE id = %s",
-                    (movement_id,)
-                )
-                return cur.rowcount > 0
 
     @staticmethod
     def _convert_decimal_fields(row_dict: dict) -> dict:
@@ -757,7 +517,7 @@ class MovementRepository:
                     LEFT JOIN fund_share_movements fsm 
                         ON a.id = fsm.account_id 
                         AND cm.id = fsm.cash_movement_id
-                    ORDER BY cm.effective_date DESC, cm.id DESC
+                    ORDER BY cm.effective_date ASC, cm.id ASC
                     """
                 )
                 rows = cur.fetchall()
@@ -825,18 +585,6 @@ class FundRepository:
                 )
                 rows = cur.fetchall()
                 return [Fund(**dict(row)) for row in rows]
-
-    @staticmethod
-    def find_by_id(fund_id: int) -> Optional[Fund]:
-        """Find a fund by ID"""
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT id, name, currency, created_at FROM funds WHERE id = %s",
-                    (fund_id,)
-                )
-                row = cur.fetchone()
-                return Fund(**dict(row)) if row else None
 
     @staticmethod
     def get_latest_navs_map() -> Dict[int, Dict]:
@@ -964,119 +712,3 @@ class FundRepository:
 
         return performances
 
-    @staticmethod
-    def create_nav(nav_data: FundNavCreate) -> FundNav:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """INSERT INTO fund_navs 
-                       (fund_id, as_of_date, fund_accumulated, shares_amount, share_value, delta_previous, delta_since_origin)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s)
-                       RETURNING *""",
-                    (
-                        nav_data.fund_id,
-                        nav_data.as_of_date,
-                        nav_data.fund_accumulated,
-                        nav_data.shares_amount,
-                        nav_data.share_value,
-                        nav_data.delta_previous,
-                        nav_data.delta_since_origin,
-                    )
-                )
-                row = cur.fetchone()
-                return FundNav(**dict(row))
-
-    @staticmethod
-    def find_nav_by_id(nav_id: int) -> Optional[FundNav]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT * FROM fund_navs WHERE id = %s",
-                    (nav_id,)
-                )
-                row = cur.fetchone()
-                return FundNav(**dict(row)) if row else None
-
-    @staticmethod
-    def update_nav(nav_id: int, nav_data: FundNavUpdate) -> Optional[FundNav]:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Build dynamic UPDATE query
-                updates = []
-                params = []
-                
-                if nav_data.as_of_date is not None:
-                    updates.append("as_of_date = %s")
-                    params.append(nav_data.as_of_date)
-                if nav_data.fund_accumulated is not None:
-                    updates.append("fund_accumulated = %s")
-                    params.append(nav_data.fund_accumulated)
-                if nav_data.shares_amount is not None:
-                    updates.append("shares_amount = %s")
-                    params.append(nav_data.shares_amount)
-                if nav_data.share_value is not None:
-                    updates.append("share_value = %s")
-                    params.append(nav_data.share_value)
-                if nav_data.delta_previous is not None:
-                    updates.append("delta_previous = %s")
-                    params.append(nav_data.delta_previous)
-                if nav_data.delta_since_origin is not None:
-                    updates.append("delta_since_origin = %s")
-                    params.append(nav_data.delta_since_origin)
-                
-                if not updates:
-                    # No updates provided, just return the existing record
-                    return FundRepository.find_nav_by_id(nav_id)
-                
-                params.append(nav_id)
-                cur.execute(
-                    f"UPDATE fund_navs SET {', '.join(updates)} WHERE id = %s RETURNING *",
-                    params
-                )
-                row = cur.fetchone()
-                return FundNav(**dict(row)) if row else None
-
-    @staticmethod
-    def delete_nav(nav_id: int) -> bool:
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "DELETE FROM fund_navs WHERE id = %s",
-                    (nav_id,)
-                )
-                return cur.rowcount > 0
-
-    @staticmethod
-    def get_all_navs(fund_id: Optional[int] = None) -> List[FundNav]:
-        """Get all NAVs, optionally filtered by fund_id"""
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                if fund_id:
-                    cur.execute(
-                        """SELECT fn.* FROM fund_navs fn
-                           WHERE fn.fund_id = %s
-                           ORDER BY fn.as_of_date DESC, fn.created_at DESC""",
-                        (fund_id,)
-                    )
-                else:
-                    cur.execute(
-                        """SELECT fn.* FROM fund_navs fn
-                           ORDER BY fn.fund_id, fn.as_of_date DESC, fn.created_at DESC"""
-                    )
-                rows = cur.fetchall()
-                return [FundNav(**dict(row)) for row in rows]
-
-    @staticmethod
-    def get_latest_nav_for_date(fund_id: int, as_of_date: date) -> Optional[FundNav]:
-        """Get the most recent NAV for a fund on or before the given date"""
-        with get_db() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """SELECT * FROM fund_navs
-                       WHERE fund_id = %s AND as_of_date <= %s
-                       ORDER BY as_of_date DESC, created_at DESC
-                       LIMIT 1""",
-                    (fund_id, as_of_date)
-                )
-                row = cur.fetchone()
-                return FundNav(**dict(row)) if row else None
