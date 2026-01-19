@@ -184,11 +184,22 @@ class AccountRepository:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'accounts'
+                      AND column_name = 'commission_rate'
+                    """
+                )
+                has_commission_rate = cur.fetchone() is not None
+                commission_rate_select = "a.commission_rate" if has_commission_rate else "NULL::numeric AS commission_rate"
+                commission_rate_group_by = ", a.commission_rate" if has_commission_rate else ""
+                cur.execute(
                     f"""
                     SELECT 
                         a.id AS account_id,
                         a.account_number,
-                        a.commission_rate,
+                        {commission_rate_select},
                         u.full_name,
                         u.email,
                         COALESCE(SUM(CASE WHEN cm.type = 'deposit' THEN cm.amount ELSE 0 END), 0) AS total_deposits,
@@ -198,7 +209,7 @@ class AccountRepository:
                     JOIN app_users u ON a.user_id = u.id
                     LEFT JOIN cash_movements cm ON cm.account_id = a.id
                     {where_clause}
-                    GROUP BY a.id, a.account_number, a.commission_rate, u.full_name, u.email
+                    GROUP BY a.id, a.account_number{commission_rate_group_by}, u.full_name, u.email
                     ORDER BY u.full_name, a.account_number
                     """,
                     params,
