@@ -2,8 +2,9 @@
 Middleware simple de rate limiting por IP
 Respaldo al rate limiting de nginx
 """
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from collections import defaultdict
 import time
 import logging
@@ -58,6 +59,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Health check no tiene límite
         if request.url.path == "/health":
             return await call_next(request)
+
+        # Preflight no cuenta para rate limit
+        if request.method == "OPTIONS":
+            return await call_next(request)
         
         # Limpiar datos antiguos periódicamente
         self._cleanup_old_requests()
@@ -81,9 +86,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 f"Rate limit exceeded for IP {client_ip}: "
                 f"{len(recent_requests)} requests in last minute"
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many requests. Please try again later."
+                content={"detail": "Too many requests. Please try again later."},
+                headers={"Retry-After": "60"},
             )
         
         # Registrar request

@@ -21,7 +21,7 @@ app = FastAPI(
 )
 
 # Rate limiting middleware (debe ir antes de CORS)
-app.add_middleware(RateLimitMiddleware, max_requests=10)
+app.add_middleware(RateLimitMiddleware, max_requests=settings.rate_limit_max)
 
 # CORS
 # Configure CORS for production with specific origins

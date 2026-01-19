@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # Firebase (optional for now)
     firebase_credentials_path: Optional[str] = Field(default=None, env="FIREBASE_CREDENTIALS_PATH")
     
+    # Rate limiting
+    rate_limit_max: int = Field(default=120, env="RATE_LIMIT_MAX")
+
     # Development mode - bypasses auth when True (⚠️ DO NOT USE IN PRODUCTION)
     dev_mode: bool = Field(default=False, env="DEV_MODE")
     dev_user_id: Optional[int] = Field(default=None, env="DEV_USER_ID")
