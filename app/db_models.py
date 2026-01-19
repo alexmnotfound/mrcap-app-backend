@@ -753,6 +753,17 @@ class FundRepository:
                 return [Fund(**dict(row)) for row in rows]
 
     @staticmethod
+    def find_by_id(fund_id: int) -> Optional[Fund]:
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, name, currency, created_at FROM funds WHERE id = %s",
+                    (fund_id,),
+                )
+                row = cur.fetchone()
+                return Fund(**dict(row)) if row else None
+
+    @staticmethod
     def get_latest_navs_map() -> Dict[int, Dict]:
         with get_db() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
