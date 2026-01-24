@@ -25,6 +25,9 @@ run: db-up ## Run the development server with database
 run-prod: ## Run the production server
 	uvicorn app.main:app --host $(HOST) --port $(PORT)
 
+deploy-prod: ## Deploy the production server
+	docker compose -f docker-compose.prod.yml up -d --build
+
 test: ## Run tests (placeholder)
 	@echo "Tests not yet implemented"
 
