@@ -395,7 +395,52 @@ class MovementRepository:
                     )
                 )
                 row = cur.fetchone()
-                return CashMovement(**dict(row))
+                cash_movement = CashMovement(**dict(row))
+
+                # Auto-create fund subscription for deposits with fund_id
+                if movement_data.fund_id and movement_data.type == "deposit":
+                    cur.execute(
+                        """
+                        SELECT share_value
+                        FROM fund_navs
+                        WHERE fund_id = %s
+                        ORDER BY as_of_date DESC
+                        LIMIT 1
+                        """,
+                        (movement_data.fund_id,),
+                    )
+                    nav_row = cur.fetchone()
+                    if not nav_row:
+                        raise ValueError(
+                            f"No NAV found for fund_id={movement_data.fund_id}. "
+                            "Please create a NAV first."
+                        )
+
+                    share_value = Decimal(nav_row["share_value"])
+                    if share_value == 0:
+                        raise ValueError("Latest NAV share_value is 0. Cannot compute shares.")
+
+                    amount = Decimal(cash_movement.amount)
+                    shares_change = amount / share_value
+
+                    cur.execute(
+                        """INSERT INTO fund_share_movements
+                           (account_id, fund_id, cash_movement_id, type, shares_change, share_price, total_amount, effective_date)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                           RETURNING id""",
+                        (
+                            cash_movement.account_id,
+                            movement_data.fund_id,
+                            cash_movement.id,
+                            "subscription",
+                            shares_change,
+                            share_value,
+                            amount,
+                            cash_movement.effective_date,
+                        ),
+                    )
+
+                return cash_movement
 
     @staticmethod
     def get_all_cash_movements() -> List[CashMovement]:
@@ -481,7 +526,67 @@ class MovementRepository:
                 if cur.rowcount == 0:
                     return None
 
-        return MovementRepository.find_cash_movement_by_id(movement_id)
+        updated = MovementRepository.find_cash_movement_by_id(movement_id)
+        if not updated:
+            return None
+
+        # Auto-create subscription if fund_id provided and none exists
+        if movement_data.fund_id and updated.type == "deposit":
+            with get_db() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT 1
+                        FROM fund_share_movements
+                        WHERE cash_movement_id = %s
+                        LIMIT 1
+                        """,
+                        (updated.id,),
+                    )
+                    exists = cur.fetchone() is not None
+                    if not exists:
+                        cur.execute(
+                            """
+                            SELECT share_value
+                            FROM fund_navs
+                            WHERE fund_id = %s
+                            ORDER BY as_of_date DESC
+                            LIMIT 1
+                            """,
+                            (movement_data.fund_id,),
+                        )
+                        nav_row = cur.fetchone()
+                        if not nav_row:
+                            raise ValueError(
+                                f"No NAV found for fund_id={movement_data.fund_id}. "
+                                "Please create a NAV first."
+                            )
+
+                        share_value = Decimal(nav_row["share_value"])
+                        if share_value == 0:
+                            raise ValueError("Latest NAV share_value is 0. Cannot compute shares.")
+
+                        amount = Decimal(updated.amount)
+                        shares_change = amount / share_value
+
+                        cur.execute(
+                            """INSERT INTO fund_share_movements
+                               (account_id, fund_id, cash_movement_id, type, shares_change, share_price, total_amount, effective_date)
+                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                               RETURNING id""",
+                            (
+                                updated.account_id,
+                                movement_data.fund_id,
+                                updated.id,
+                                "subscription",
+                                shares_change,
+                                share_value,
+                                amount,
+                                updated.effective_date,
+                            ),
+                        )
+
+        return updated
 
     @staticmethod
     def delete_cash_movement(movement_id: int) -> bool:
